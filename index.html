@@ -233,19 +233,7 @@
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-
-<!-- Three.js 加载失败兜底（需紧跟 CDN 脚本尽早执行） -->
-<script>
-if (typeof THREE === 'undefined'){
-  document.getElementById('start').innerHTML =
-    '<div style="padding:80px 20px;text-align:center;color:#f88;font-size:16px;line-height:2">' +
-    '? Three.js 加载失败<br>' +
-    '<span style="font-size:13px;color:#aaa">请检查网络能否访问 cdn.jsdelivr.net，' +
-    '或下载 three.min.js 到本地后改用相对路径</span></div>';
-  throw new Error('THREE not loaded');
-}
-</script>
+<script src="js/three.min.js"></script>
 
 <!-- 静态数据 -->
 <script src="assets/keywords.js"></script>

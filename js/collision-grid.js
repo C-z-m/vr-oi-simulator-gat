@@ -1,14 +1,6 @@
 'use strict';
 /* =========================================================
-   collision-grid —— 空间哈希碰撞索引
-   ---------------------------------------------------------
-   替换 core.js 里 O(n) 的 collides()。行为与旧实现完全一致：
-   障碍物仍是轴对齐 AABB {x, z, hw, hd}，判定仍是"中心距离 < hw+r"。
-   ---------------------------------------------------------
-   - 网格单元 GRID_CELL 米见方；障碍注册到它覆盖的所有单元；
-   - 查询点所在单元的 3x3 邻域；覆盖 r ≤ GRID_CELL 的所有情况
-     （本游戏最大 r = 0.3，GRID_CELL = 2，安全）；
-   - 用 _stamp 去重：同一个障碍被多个桶命中时只判一次。
+   collision-grid —— 真 3D 空间哈希碰撞索引
    ========================================================= */
 
 const GRID_CELL = 2;
@@ -18,9 +10,9 @@ let gridStamp = 0;
 function gridKey(cx, cz){ return cx + ',' + cz; }
 function gridCell(v){ return Math.floor(v / GRID_CELL); }
 
-/* 向障碍系统添加一个轴对齐 AABB */
-function addObstacle(x, z, hw, hd){
-  const o = { x, z, hw, hd, _stamp: 0, active: true }; // 新增 active 属性
+/* 注册 3D 障碍物，加入高度 minY 和 maxY */
+function addObstacle(x, z, hw, hd, height = 10, yOffset = 0){
+  const o = { x, z, hw, hd, minY: yOffset, maxY: yOffset + height, _stamp: 0, active: true };
   obstacles.push(o);
 
   const cx0 = gridCell(x - hw), cx1 = gridCell(x + hw);
@@ -33,11 +25,11 @@ function addObstacle(x, z, hw, hd){
       arr.push(o);
     }
   }
-  return o; // 返回引用，方便后续控制
+  return o;
 }
 
-/* 点 (x,z) 半径 r 是否与任何障碍相交 */
-function collides(x, z, r){
+/* 3D 碰撞查询：传入高度 y，检测该高度是否有障碍物 */
+function collides(x, z, r, y = 0){
   gridStamp++;
   const cx = gridCell(x), cz = gridCell(z);
   for (let dx = -1; dx <= 1; dx++){
@@ -46,11 +38,41 @@ function collides(x, z, r){
       if (!arr) continue;
       for (let i = 0; i < arr.length; i++){
         const o = arr[i];
-        if (o._stamp === gridStamp || o.active === false) continue; // 跳过失效的障碍
+        if (o._stamp === gridStamp || o.active === false) continue;
         o._stamp = gridStamp;
-        if (Math.abs(x - o.x) < o.hw + r && Math.abs(z - o.z) < o.hd + r) return true;
+        
+        // 核心：不仅要 XZ 平面相交，且高度 Y 也必须落在障碍物的区间内
+        if (y >= o.minY - 0.5 && y < o.maxY - 0.1) {
+          if (Math.abs(x - o.x) < o.hw + r && Math.abs(z - o.z) < o.hd + r) return true;
+        }
       }
     }
   }
   return false;
+}
+
+/* 寻找脚下的落脚点高度：返回玩家在该 XZ 坐标能站立的最高高度 */
+function getGroundY(x, z, r, currentY){
+  let maxGround = 0; // 默认为地面高度
+  gridStamp++;
+  const cx = gridCell(x), cz = gridCell(z);
+  for (let dx = -1; dx <= 1; dx++){
+    for (let dz = -1; dz <= 1; dz++){
+      const arr = gridBuckets.get(gridKey(cx + dx, cz + dz));
+      if (!arr) continue;
+      for (let i = 0; i < arr.length; i++){
+        const o = arr[i];
+        if (o._stamp === gridStamp || o.active === false) continue;
+        o._stamp = gridStamp;
+        
+        if (Math.abs(x - o.x) < o.hw + r && Math.abs(z - o.z) < o.hd + r) {
+          // 如果障碍物顶部低于玩家当前位置（防止穿模），且高于目前的落脚点
+          if (o.maxY <= currentY + 0.6 && o.maxY > maxGround) {
+             maxGround = o.maxY;
+          }
+        }
+      }
+    }
+  }
+  return maxGround;
 }

@@ -1,6 +1,6 @@
 'use strict';
 /* =========================================================
-   street —— 十字街区（完美人行道覆盖版）
+   street —— 十字街区（真3D极限跑酷版）
    ========================================================= */
 
 let streetGroup = null;
@@ -46,29 +46,25 @@ function buildStreet() {
   const roadMat = mat(0x444c5e, { roughness: 0.9 });
   const walkMat = mat(0x7a869a, { roughness: 0.8 });
 
-  // 【核心修复1】直接铺一整层超大人行道，覆盖整个可活动区域
-  // 这样不管马路怎么交错，马路旁边露出来的必定是浅色人行道，绝对不会漏铺。
   const megaWalk = new THREE.Mesh(new THREE.PlaneGeometry(240, 240), walkMat);
   megaWalk.rotation.x = -Math.PI / 2;
   megaWalk.position.set(70, 0.02, 0);
   streetGroup.add(megaWalk);
 
-  // 铺设纵向道路
   for (let x of ROAD_X) {
     const road = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_W, 220), roadMat);
     road.rotation.x = -Math.PI / 2;
-    road.position.set(x - 8, 0.04, 0); // 提高一点，盖在人行道上
+    road.position.set(x - 8, 0.04, 0); 
     streetGroup.add(road);
   }
-  // 铺设横向道路
   for (let z of ROAD_Z) {
     const road = new THREE.Mesh(new THREE.PlaneGeometry(200, ROAD_W), roadMat);
     road.rotation.x = -Math.PI / 2;
-    road.position.set(70, 0.05, z); // 再高一点点，防止十字路口交界处闪烁
+    road.position.set(70, 0.05, z);
     streetGroup.add(road);
   }
 
-  // 3. 算法生成建筑 (Block)
+  // 3. 算法生成建筑
   const bldgMat = mat(0x8b96a8, { roughness: 0.9 });
   const matTop = new THREE.MeshStandardMaterial({ color: 0x555f70 });
 
@@ -87,6 +83,9 @@ function buildStreet() {
       if (i === 0 || i === xCenters.length - 1) w = 26;
       let h = 20 + Math.random() * 15;
 
+      // 【核心修复】专门挑一栋楼作为跑酷大楼，固定 35 米高度
+      if (cx === 120 && cz === -25) h = 35;
+
       const tex = makeBuildingTexture(w, h, d);
       const matSide = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 });
       
@@ -94,17 +93,18 @@ function buildStreet() {
       b.position.set(cx - 8, h / 2, cz);
       streetGroup.add(b);
       
-      addObstacle(cx, cz, w / 2, d / 2);
+      // 【核心修复】注册真实的物理高度，保证楼顶是实心的！
+      addObstacle(cx, cz, w / 2, d / 2, h, 0);
     }
   }
 
-  // 4. 建造边界墙（包裹整个城市）
+  // 4. 建造边界墙
   function createBoundaryWall(localX, z, w, d) {
     const h = 15; 
     const wall = new THREE.Mesh(getBoxGeo(w, h, d), mat(0x3a4355, { roughness: 0.95 }));
     wall.position.set(localX, h / 2, z);
     streetGroup.add(wall);
-    addObstacle(localX + 8, z, w / 2, d / 2);
+    addObstacle(localX + 8, z, w / 2, d / 2, h, 0);
     
     const line = new THREE.Mesh(getBoxGeo(w, 0.5, d), mat(0x8b0000, { emissive: 0x330000 }));
     line.position.set(localX, h, z);
@@ -121,7 +121,7 @@ function buildStreet() {
   streetGroup.add(storeGroup);
   
   const storeFloor = new THREE.Mesh(new THREE.PlaneGeometry(16, 12), mat(0x556677, { roughness: 0.6 }));
-  storeFloor.rotation.x = -Math.PI / 2; storeFloor.position.y = 0.06; // 稍高防闪烁
+  storeFloor.rotation.x = -Math.PI / 2; storeFloor.position.y = 0.06;
   storeGroup.add(storeFloor);
   const storeCeil = new THREE.Mesh(new THREE.PlaneGeometry(16, 12), mat(0x11151c));
   storeCeil.rotation.x = Math.PI / 2; storeCeil.position.y = 4.0;
@@ -134,18 +134,18 @@ function buildStreet() {
   box(5, 4, 0.2, 0x334455, 5.5, 2, 6, storeGroup);
   box(6, 1, 0.2, 0x334455, 0, 3.5, 6, storeGroup);
   
-  addObstacle(32, -25, 0.1, 6);
-  addObstacle(48, -25, 0.1, 6);
-  addObstacle(40, -31, 8, 0.1);
-  addObstacle(34.5, -19, 2.5, 0.1);
-  addObstacle(45.5, -19, 2.5, 0.1);
+  addObstacle(32, -25, 0.1, 6, 4, 0);
+  addObstacle(48, -25, 0.1, 6, 4, 0);
+  addObstacle(40, -31, 8, 0.1, 4, 0);
+  addObstacle(34.5, -19, 2.5, 0.1, 4, 0);
+  addObstacle(45.5, -19, 2.5, 0.1, 4, 0);
 
   const storeLight = new THREE.PointLight(0xffffff, 1.5, 20, 2);
   storeLight.position.set(0, 3.8, 0);
   storeGroup.add(storeLight);
   
   box(3, 1.1, 1.2, 0x334455, 0, 0.55, -4, storeGroup);
-  addObstacle(40, -29, 1.5, 0.6);
+  addObstacle(40, -29, 1.5, 0.6, 1.1, 0);
   const monitor = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1), new THREE.MeshBasicMaterial({ color: 0x00ffcc }));
   monitor.position.set(0, 2.5, -5.89);
   storeGroup.add(monitor);
@@ -176,9 +176,9 @@ function buildStreet() {
     }
   };
   interactables.push(vendBox);
-  addObstacle(38, -19, 0.6, 0.4); 
+  addObstacle(38, -19, 0.6, 0.4, 2, 0); 
 
-  // 7. 涂鸦 (偏僻角落)
+  // 7. 涂鸦
   const graffitiTex = (() => {
     const c = document.createElement('canvas'); c.width = 512; c.height = 256;
     const x = c.getContext('2d');
@@ -248,7 +248,7 @@ function buildStreet() {
     }
     const hw = (1.8 * Math.abs(Math.cos(rotY)) + 4 * Math.abs(Math.sin(rotY))) / 2;
     const hd = (1.8 * Math.abs(Math.sin(rotY)) + 4 * Math.abs(Math.cos(rotY))) / 2;
-    const obsRef = addObstacle(globalX, z, hw, hd);
+    const obsRef = addObstacle(globalX, z, hw, hd, 1.5, 0); 
     carGroup.userData = { isCar: true, hp: 100, obsRef, color };
     cityCars.push(carGroup);
   }
@@ -273,4 +273,60 @@ function buildStreet() {
       spawned++;
     }
   }
+
+  // =========================================================
+  // 10. 终极真 3D 螺旋登天跑酷 (紧贴大楼，间距 2.5m，升高 1.15m)
+  // =========================================================
+  function createPlatform(x, z, h, color = 0xff3333, size = 1.2) {
+    const localX = x - 8;
+    box(size, h, size, color, localX, h/2, z, streetGroup);
+    addObstacle(x, z, size/2, size/2, h, 0);
+  }
+
+  /* 
+    目标大楼：(120, -25)，宽30深30，高35。
+    四面墙壁位置：
+    西 x=105, 东 x=135, 北 z=-40, 南 z=-10。
+    平台离墙留出 0.5 米间隙（因为人自身有宽度）。
+  */
+  let curH = 1.0;
+  
+  // 1. 西墙段 (从南往北，Z 从 -12 到 -38)
+  for (let i = 0; i < 11; i++) {
+    createPlatform(104.5, -12 - i * 2.5, curH);
+    curH += 1.15;
+  }
+  
+  // 西北拐角过渡平台 (稍微外凸，防止卡模型)
+  createPlatform(104.5, -39.5, curH, 0xffaa00);
+  curH += 1.15;
+  
+  // 2. 北墙段 (从西往东，X 从 107 到 133)
+  for (let i = 0; i < 11; i++) {
+    createPlatform(107 + i * 2.5, -40.5, curH);
+    curH += 1.15;
+  }
+
+  // 东北拐角过渡平台
+  createPlatform(134.5, -40.5, curH, 0xffaa00);
+  curH += 1.15;
+
+  // 3. 东墙段 (从北往南，Z 从 -38 到 -12)
+  for (let i = 0; i < 11; i++) {
+    createPlatform(135.5, -38 + i * 2.5, curH);
+    curH += 1.15;
+  }
+
+  // 东南拐角过渡平台
+  createPlatform(135.5, -10.5, curH, 0xffaa00);
+  curH += 1.15;
+
+  // 4. 南墙段 (从东往西，X 从 133 到 107)
+  for (let i = 0; i < 11; i++) {
+    createPlatform(133 - i * 2.5, -9.5, curH);
+    curH += 1.15;
+  }
+
+  // 终极天台 (高 36 米，完美覆盖楼顶边缘，助你一跃登顶)
+  createPlatform(104.5, -10.5, curH + 0.5, 0xffaa00, 4.0);
 }

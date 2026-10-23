@@ -117,51 +117,20 @@ function updatePlayer(dt){
 }
 
 /* ---------- 跳跃 ---------- */
-const JUMP_GRAVITY = 20;          
-const JUMP_VELOCITY = 6.4;        
-let jumpY = 0, velY = 0, onGround = true;
-const _jumpSafe = new THREE.Vector3(0, 0, -2.08);
+const JUMP_GRAVITY = 22; // 重力稍微小一点
+const JUMP_VELOCITY = 9.0; // 初速度加大
+let velY = 0, onGround = true;
 
 function tryJump(){
   if (!onGround || state.view !== 'world' || state.ended) return;
   velY = JUMP_VELOCITY;
   onGround = false;
-  _jumpSafe.set(state.pos.x, 0, state.pos.z);
   audio.beep(420, 0.05, 0.03, 'triangle');
 }
 
-function updateJump(dt){
-  if (onGround) return;
-  velY -= JUMP_GRAVITY * dt;
-  jumpY += velY * dt;
-  if (jumpY <= 0){
-    jumpY = 0;
-    velY = 0;
-    onGround = true;
-    audio.step();
-    
-    /* 【核心修复】落点卡进障碍时，不再强行传送回起点，而是智能向周围寻找空地滑出 */
-    if (collides(state.pos.x, state.pos.z, 0.28)){
-      let found = false;
-      for (let r = 0.5; r <= 3.0; r += 0.5) {
-        if (!collides(state.pos.x + r, state.pos.z, 0.28)) { state.pos.x += r; found = true; break; }
-        if (!collides(state.pos.x - r, state.pos.z, 0.28)) { state.pos.x -= r; found = true; break; }
-        if (!collides(state.pos.x, state.pos.z + r, 0.28)) { state.pos.z += r; found = true; break; }
-        if (!collides(state.pos.x, state.pos.z - r, 0.28)) { state.pos.z -= r; found = true; break; }
-      }
-      // 如果四周全堵死了，才无奈退回起跳点
-      if (!found) {
-        state.pos.x = _jumpSafe.x;
-        state.pos.z = _jumpSafe.z;
-      }
-    }
-  }
-}
-
 function updatePlayer(dt){
-  updateJump(dt);
   const sprinting = !!state.keys['shift'];
-  const speed = sprinting ? 5.0 : 3.1;   // Shift 加速
+  const speed = sprinting ? 5.0 : 3.1;
   _fwd.set(-Math.sin(state.yaw), 0, -Math.cos(state.yaw));
   _right.set(Math.cos(state.yaw), 0, -Math.sin(state.yaw));
   _move.set(0, 0, 0);
@@ -172,6 +141,7 @@ function updatePlayer(dt){
 
   const moving = _move.lengthSq() > 0;
   lastMoveSpeed = moving ? speed : 0;
+  
   if (moving){
     _move.normalize().multiplyScalar(speed * dt);
     
@@ -179,21 +149,50 @@ function updatePlayer(dt){
     const nx = clamped.x;
     const nz = clamped.z;
 
-    /* 分轴滑动碰撞 */
-    const air = !onGround;
-    if (air || !collides(nx, state.pos.z, 0.28)) state.pos.x = nx;
-    if (air || !collides(state.pos.x, nz, 0.28)) state.pos.z = nz;
+    // 【真3D碰撞】检查目标位置在“当前脚部高度”是否有墙
+    // 这里用 state.pos.y - 1.65 + 0.2 (大概膝盖位置) 来检测
+    const legY = state.pos.y - 1.65 + 0.2;
+    
+    // 如果是跳在半空中，就不做水平碰撞，防止被卡住
+    if (!onGround || !collides(nx, state.pos.z, 0.28, legY)) state.pos.x = nx;
+    if (!onGround || !collides(state.pos.x, nz, 0.28, legY)) state.pos.z = nz;
 
-    state.bob += dt * (sprinting ? 15 : 11);   // 疾走时脚步更急促
+    state.bob += dt * (sprinting ? 15 : 11);   
     if (Math.sin(state.bob) > 0.96 && Math.random() < 0.4) audio.step();
   } else {
     state.bob += dt * 1.2;
   }
   
-  const bobY = moving ? Math.sin(state.bob) * 0.022 : Math.sin(state.bob) * 0.004;
+  // ================= 重力与落脚点计算 =================
+  // 找出脚下能站的最高台面（地面是 0，车顶可能是 1.0）
+  const groundHeight = getGroundY(state.pos.x, state.pos.z, 0.28, state.pos.y - 1.65);
   
-  /* 【核心修复】把跳跃高度 jumpY 加上去！相机终于能上天了！ */
-  camera.position.set(state.pos.x, 1.65 + bobY + jumpY, state.pos.z);
+  if (!onGround) {
+    velY -= JUMP_GRAVITY * dt;
+    state.pos.y += velY * dt;
+    
+    // 如果掉落到了落脚点
+    if (state.pos.y - 1.65 <= groundHeight) {
+      state.pos.y = groundHeight + 1.65;
+      velY = 0;
+      onGround = true;
+      audio.step();
+    }
+  } else {
+    // 如果在走，并且脚下的台面突然消失了（比如走下车顶），开始坠落
+    if (state.pos.y - 1.65 > groundHeight + 0.1) {
+      onGround = false;
+      velY = 0;
+    } else {
+      // 贴地行走
+      state.pos.y = groundHeight + 1.65;
+    }
+  }
+
+  const bobY = moving && onGround ? Math.sin(state.bob) * 0.022 : 0;
+  
+  // 相机位置直接使用真正的 state.pos.y
+  camera.position.set(state.pos.x, state.pos.y + bobY, state.pos.z);
   camera.rotation.set(state.pitch, state.yaw, 0, 'YXZ');
   
   camera.rotation.x += recoilPitch;

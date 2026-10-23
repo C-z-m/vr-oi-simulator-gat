@@ -1,10 +1,19 @@
 'use strict';
 /* =========================================================
-   save —— 进度存档读写（完美城市与门状态版）
+   save —— 进度存档读写（定时自动保存 + 驾驶兼容版）
    ========================================================= */
 
 const SAVE_KEY = 'oi_save_v8';
 let autoSaveTimer = null;
+
+// 【新增】开启定时自动存档（每 15 秒存一次）
+function startAutoSave() {
+  setInterval(() => {
+    if (state.started && !state.ended) {
+      persistSave();
+    }
+  }, 15000);
+}
 
 function scheduleAutoSave(){
   clearTimeout(autoSaveTimer);
@@ -14,9 +23,13 @@ function scheduleAutoSave(){
 function persistSave(){
   if (!state.started || state.ended) return;
   try {
-    // 如果玩家在车里，先滚下车，以免存档的时候车没了导致卡死
-    if (typeof drivingState !== 'undefined' && drivingState.isDriving) {
-      if (typeof exitCar === 'function') exitCar();
+    // 【修复】如果在车里，不再强制下车！直接保存当前坐标
+    let saveX = state.pos.x;
+    let saveZ = state.pos.z;
+    
+    if (typeof drivingState !== 'undefined' && drivingState.isDriving && drivingState.car) {
+      saveX = drivingState.car.position.x + 8; // 局部转全局
+      saveZ = drivingState.car.position.z;
     }
 
     const blob = {
@@ -25,15 +38,14 @@ function persistSave(){
       warnCount: state.warnCount,
       achievements: Array.from(state.achievements),
       
-      // 核心：全量保存玩家和枪械状态
-      doorOpen: state.doorOpen, // 存门！
+      doorOpen: state.doorOpen,
       gun: state.gun ? {
         owned: state.gun.owned, equipped: state.gun.equipped,
         mag: state.gun.mag, reserve: state.gun.reserve
       } : null,
       
       zone: currentZoneId,
-      pos: { x: state.pos.x, y: state.pos.y, z: state.pos.z },
+      pos: { x: saveX, y: state.pos.y, z: saveZ },
       yaw: state.yaw,
       pitch: state.pitch,
       hp: state.hp,
@@ -51,7 +63,7 @@ function persistSave(){
       problems: state.problems.map(p => p.id)
     };
     localStorage.setItem(SAVE_KEY, JSON.stringify(blob));
-    console.log("游戏已成功保存:", blob.zone);
+    // console.log("游戏已自动保存:", blob.zone);
   } catch(e){ console.error("保存失败", e); }
 }
 
@@ -62,7 +74,6 @@ function tryLoadSave(){
     const o = JSON.parse(raw);
     if (!o || typeof o !== 'object') return false;
     
-    // 恢复题目
     if (Array.isArray(o.problems) && o.problems.length === 4){
       const restored = o.problems.map(id => PROBLEM_BY_ID.get(id)).filter(Boolean);
       if (restored.length === 4){
@@ -80,19 +91,17 @@ function tryLoadSave(){
     if (typeof o.warnCount === 'number') state.warnCount = o.warnCount;
     if (Array.isArray(o.achievements)) state.achievements = new Set(o.achievements);
     
-    // 【核心修复】彻底恢复门开状态
-    if (typeof o.doorOpen === 'boolean') {
-      state.doorOpen = o.doorOpen;
-      if (state.doorOpen && typeof openTheDoor === 'function') {
-        openTheDoor();
-        // 直接把门推开并亮起白光（省略开门动画）
-        if (typeof updateDoorLight === 'function') {
-           for(let i=0; i<100; i++) updateDoorLight(0.05);
-        }
+    // 【核心修复】读档时绝对不恢复考场门的白光，防止城市里出现时空错乱
+    if (typeof o.doorOpen === 'boolean' && o.doorOpen && currentZoneId === 'classroom') {
+      state.doorOpen = true;
+      if (typeof openTheDoor === 'function') openTheDoor();
+      if (typeof updateDoorLight === 'function') {
+         for(let i=0; i<100; i++) updateDoorLight(0.05);
       }
+    } else {
+      state.doorOpen = false; // 如果在城市，门必须是关的
     }
 
-    // 【核心修复】彻底恢复枪械状态
     if (o.gun && typeof o.gun === 'object' && state.gun){
       state.gun.owned    = !!o.gun.owned;
       state.gun.equipped = !!o.gun.equipped && state.gun.owned;
@@ -106,10 +115,8 @@ function tryLoadSave(){
       }
     }
 
-    // 恢复区域
     if (typeof o.zone === 'string') setCurrentZone(o.zone);
     
-    // 恢复血量和通缉
     if (typeof o.hp === 'number') state.hp = o.hp;
     if (typeof o.hpVisible === 'boolean') state.hpVisible = o.hpVisible;
     if (o.cityEntryReason) state.cityEntryReason = o.cityEntryReason;
@@ -124,25 +131,21 @@ function tryLoadSave(){
       }
     }
 
-    // 【核心修复】如果在城市里，彻底接管环境、UI和场景
     if (currentZoneId === 'street') {
       if (!streetGroup && typeof buildStreet === 'function') {
         buildStreet();
         if (typeof initPathfinding === 'function') initPathfinding();
       }
       
-      // 1. 关掉考场的背景和雾，换成城市的
       if (scene) {
         scene.background.setHex(0x9bb2c7);
         scene.fog.color.setHex(0x9bb2c7);
         scene.fog.density = 0.02;
       }
       
-      // 2. 隐藏所有考试 HUD
       const hideEls = ['hudTimer', 'hudScore', 'hudProbs'];
       hideEls.forEach(id => { const e = document.getElementById(id); if (e) e.style.display = 'none'; });
       
-      // 3. 恢复通缉星
       const wantedHud = document.getElementById('wantedHud');
       if (wantedHud) {
         if (state.cityMode.wantedLevel > 0) {
@@ -153,24 +156,33 @@ function tryLoadSave(){
         }
       }
       
-      // 4. 刷出路人
       if (typeof initCityNpcs === 'function') initCityNpcs();
       
     } else {
-      // 在考场：确保考场 UI 正常
       const hideEls = ['hudTimer', 'hudScore', 'hudProbs'];
       hideEls.forEach(id => { const e = document.getElementById(id); if (e) e.style.display = ''; });
     }
 
-    // 恢复坐标与视角
     if (o.pos) {
       let px = o.pos.x;
       let pz = o.pos.z;
       
+      // 【核心修复】如果刷车把你卡在里面了，或者你正好存了车里的档，自动把你挪到旁边
       if (typeof collides === 'function' && collides(px, pz, 0.5)) {
-        px = currentZoneId === 'street' ? 20 : 0;
-        pz = currentZoneId === 'street' ? 0 : -1.72;
-        toast('⚠️ 当前位置被障碍物卡住，已移至安全点。', 3000);
+        // 找周围空地
+        let safe = false;
+        for (let r = 1; r <= 5; r++) {
+          if (!collides(px + r, pz, 0.5)) { px += r; safe = true; break; }
+          if (!collides(px - r, pz, 0.5)) { px -= r; safe = true; break; }
+          if (!collides(px, pz + r, 0.5)) { pz += r; safe = true; break; }
+          if (!collides(px, pz - r, 0.5)) { pz -= r; safe = true; break; }
+        }
+        if (!safe) {
+          const b = getZoneBounds();
+          px = (b.minX + b.maxX) / 2;
+          pz = (b.minZ + b.maxZ) / 2;
+        }
+        toast('⚠️ 当前位置被占用，已移至安全区域。', 3000);
       }
       
       state.pos.set(px, o.pos.y, pz);
@@ -207,3 +219,6 @@ function tryLoadSave(){
 function clearSave(){
   try { localStorage.removeItem(SAVE_KEY); } catch(e){}
 }
+
+// 初始化时启动自动保存
+startAutoSave();

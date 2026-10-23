@@ -1,11 +1,11 @@
 'use strict';
 /* =========================================================
-   city-npc —— 城市路人系统与通缉反应（适配大地图版）
+   city-npc —— 城市路人系统与通缉反应（区域边界统一版）
    ========================================================= */
 
 const cityNpcs = [];
-let npcSpawnTimer = 10.0; // 初始 10 秒后开始第一次刷新
-const MAX_CITY_NPCS = 20; // 地图变大，路人上限提高到 20
+let npcSpawnTimer = 10.0;
+const MAX_CITY_NPCS = 20;
 
 function spawnCityNpc(x, z) {
   const colors = [0xd8a878, 0x6b8e23, 0x4682b4, 0xcd5c5c, 0x9370db];
@@ -29,12 +29,9 @@ function spawnCityNpc(x, z) {
 }
 
 function initCityNpcs() {
-  for (let npc of cityNpcs) {
-    scene.remove(npc.group);
-  }
+  for (let npc of cityNpcs) scene.remove(npc.group);
   cityNpcs.length = 0;
   
-  // 初始生成 10 个路人，分散在地图各处
   for (let i = 0; i < 10; i++) {
     const x = -20 + Math.random() * 180; 
     const z = -90 + Math.random() * 180; 
@@ -42,26 +39,30 @@ function initCityNpcs() {
   }
 }
 
-// 新增：路人低频刷新逻辑
 function updateCityNpcSpawner(dt) {
   if (state.ended) return;
   
   npcSpawnTimer -= dt;
   if (npcSpawnTimer <= 0) {
-    npcSpawnTimer = 15.0; // 每 15 秒刷新一个
+    npcSpawnTimer = 15.0; 
     
     const aliveNpcs = cityNpcs.filter(n => n.userData.state !== 'down');
     if (aliveNpcs.length < MAX_CITY_NPCS) {
       const px = state.pos.x;
-      let spawnX = -20 + Math.random() * 180;
+      const bnds = getZoneBounds(); // 【核心修改】获取当前地图边界
       
-      // 如果随机点离玩家太近（小于20米），强制挪远
+      // 在边界内随机生成 X 坐标
+      let spawnX = bnds.minX + Math.random() * (bnds.maxX - bnds.minX);
+      
+      // 防止在玩家脸上刷新（距离小于 20 米就挪到地图最左或最右）
       if (Math.abs(spawnX - px) < 20) {
-        spawnX = px > 80 ? -10 : 170;
+        spawnX = px > (bnds.minX + bnds.maxX) / 2 ? bnds.minX + 10 : bnds.maxX - 10;
       }
-      const spawnZ = -90 + Math.random() * 180;
       
-      // 确保生成点不卡在墙里
+      // 在边界内随机生成 Z 坐标
+      const spawnZ = bnds.minZ + Math.random() * (bnds.maxZ - bnds.minZ);
+      
+      // 确保不卡在墙里
       if (!collides(spawnX, spawnZ, 0.5)) {
         spawnCityNpc(spawnX, spawnZ);
       }
@@ -84,7 +85,6 @@ function updateCityNpcs(dt, t) {
     const dz = n.group.position.z - pz;
     const dist = Math.hypot(dx, dz);
 
-    // 1. 判定是否要逃跑
     if (wanted > 0 && dist < 8 && ud.state !== 'flee') {
       ud.state = 'flee';
       ud.panicTimer = 4.0; 
@@ -94,7 +94,6 @@ function updateCityNpcs(dt, t) {
       }
     }
 
-    // 2. 状态机
     if (ud.state === 'wander') {
       ud.wanderTimer -= dt;
       if (ud.wanderTimer <= 0) {
@@ -104,17 +103,19 @@ function updateCityNpcs(dt, t) {
       }
       
       const step = ud.speed * 0.4 * dt;
-      const nx = n.group.position.x + ud.dirX * step;
-      const nz = n.group.position.z + ud.dirZ * step;
+      const rawX = n.group.position.x + ud.dirX * step;
+      const rawZ = n.group.position.z + ud.dirZ * step;
       
-      // 应用新边界 [-25, 185] 和 [-105, 105]，并检测碰撞
-      if (!collides(nx, n.group.position.z, 0.3)) {
-        n.group.position.x = clamp(nx, -25, 185);
+      const clamped = clampToZone(rawX, rawZ);
+      
+      if (!collides(clamped.x, n.group.position.z, 0.3)) {
+        n.group.position.x = clamped.x;
       } else {
         ud.dirX = -ud.dirX;
       }
-      if (!collides(n.group.position.x, nz, 0.3)) {
-        n.group.position.z = clamp(nz, -105, 105);
+      
+      if (!collides(n.group.position.x, clamped.z, 0.3)) {
+        n.group.position.z = clamped.z;
       } else {
         ud.dirZ = -ud.dirZ;
       }
@@ -142,15 +143,16 @@ function updateCityNpcs(dt, t) {
       fleeZ /= fl;
       
       const step = ud.speed * 1.2 * dt;
-      const nx = n.group.position.x + fleeX * step;
-      const nz = n.group.position.z + fleeZ * step;
+      const rawX = n.group.position.x + fleeX * step;
+      const rawZ = n.group.position.z + fleeZ * step;
       
-      // 应用新边界，并检测碰撞
-      if (!collides(nx, n.group.position.z, 0.3)) {
-        n.group.position.x = clamp(nx, -25, 185);
+      const clampedFlee = clampToZone(rawX, rawZ);
+      
+      if (!collides(clampedFlee.x, n.group.position.z, 0.3)) {
+        n.group.position.x = clampedFlee.x;
       }
-      if (!collides(n.group.position.x, nz, 0.3)) {
-        n.group.position.z = clamp(nz, -105, 105);
+      if (!collides(n.group.position.x, clampedFlee.z, 0.3)) {
+        n.group.position.z = clampedFlee.z;
       }
       
       n.group.rotation.y = Math.atan2(fleeX, fleeZ);

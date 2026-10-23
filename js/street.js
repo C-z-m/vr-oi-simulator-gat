@@ -1,6 +1,6 @@
 'use strict';
 /* =========================================================
-   street —— P5 超大城市（算法生成路网）
+   street —— 十字街区（完美人行道覆盖版）
    ========================================================= */
 
 let streetGroup = null;
@@ -29,17 +29,16 @@ function makeBuildingTexture(w, h, d) {
 
 function buildStreet() {
   streetGroup = new THREE.Group();
-  streetGroup.position.set(8, 0, 0); // local + 8 = global
+  streetGroup.position.set(8, 0, 0);
   scene.add(streetGroup);
 
-  // 1. 超级底盘
+  /* 1. 超级底盘 */
   const baseFloor = new THREE.Mesh(new THREE.PlaneGeometry(250, 250), mat(0x2a303d, { roughness: 1 }));
   baseFloor.rotation.x = -Math.PI / 2;
   baseFloor.position.set(70, -0.1, 0);
   streetGroup.add(baseFloor);
 
-  // 2. 算法路网
-  // 道路中心线
+  /* 2. 算法路网与人行道 */
   const ROAD_X = [20, 60, 100, 140];
   const ROAD_Z = [-50, 0, 50];
   const ROAD_W = 14;
@@ -47,18 +46,25 @@ function buildStreet() {
   const roadMat = mat(0x444c5e, { roughness: 0.9 });
   const walkMat = mat(0x7a869a, { roughness: 0.8 });
 
+  // 【核心修复1】直接铺一整层超大人行道，覆盖整个可活动区域
+  // 这样不管马路怎么交错，马路旁边露出来的必定是浅色人行道，绝对不会漏铺。
+  const megaWalk = new THREE.Mesh(new THREE.PlaneGeometry(240, 240), walkMat);
+  megaWalk.rotation.x = -Math.PI / 2;
+  megaWalk.position.set(70, 0.02, 0);
+  streetGroup.add(megaWalk);
+
   // 铺设纵向道路
   for (let x of ROAD_X) {
     const road = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_W, 220), roadMat);
     road.rotation.x = -Math.PI / 2;
-    road.position.set(x - 8, 0, 0);
+    road.position.set(x - 8, 0.04, 0); // 提高一点，盖在人行道上
     streetGroup.add(road);
   }
   // 铺设横向道路
   for (let z of ROAD_Z) {
     const road = new THREE.Mesh(new THREE.PlaneGeometry(200, ROAD_W), roadMat);
     road.rotation.x = -Math.PI / 2;
-    road.position.set(70, 0, z);
+    road.position.set(70, 0.05, z); // 再高一点点，防止十字路口交界处闪烁
     streetGroup.add(road);
   }
 
@@ -66,7 +72,6 @@ function buildStreet() {
   const bldgMat = mat(0x8b96a8, { roughness: 0.9 });
   const matTop = new THREE.MeshStandardMaterial({ color: 0x555f70 });
 
-  // 中心点网格
   const xCenters = [-10, 40, 80, 120, 160];
   const zCenters = [-75, -25, 25, 75];
 
@@ -75,14 +80,11 @@ function buildStreet() {
       let cx = xCenters[i];
       let cz = zCenters[j];
       
-      // 预留位置：便利店在 (40, -25)，修改为不生成大楼
-      if (cx === 40 && cz === -25) continue;
+      if (cx === 40 && cz === -25) continue; // 预留便利店
 
-      // 计算楼体宽度，留出道路和人行道
       let w = 30;
       let d = 30;
       if (i === 0 || i === xCenters.length - 1) w = 26;
-      
       let h = 20 + Math.random() * 15;
 
       const tex = makeBuildingTexture(w, h, d);
@@ -92,16 +94,7 @@ function buildStreet() {
       b.position.set(cx - 8, h / 2, cz);
       streetGroup.add(b);
       
-      // 全局碰撞体
       addObstacle(cx, cz, w / 2, d / 2);
-
-      // 人行道包围大楼
-      const walkW = w + 6;
-      const walkD = d + 6;
-      const walk = new THREE.Mesh(new THREE.PlaneGeometry(walkW, walkD), walkMat);
-      walk.rotation.x = -Math.PI / 2;
-      walk.position.set(cx - 8, 0.02, cz);
-      streetGroup.add(walk);
     }
   }
 
@@ -122,68 +115,37 @@ function buildStreet() {
   createBoundaryWall(70, 110, 200, 2); // 南
   createBoundaryWall(70, -110, 200, 2); // 北
 
-  // 5. 便利店 (豪华货架回归！售货机放外面！)
+  // 5. 便利店
   const storeGroup = new THREE.Group();
-  storeGroup.position.set(32, 0, -25); // 全局 X=40, Z=-25
+  storeGroup.position.set(32, 0, -25);
   streetGroup.add(storeGroup);
   
   const storeFloor = new THREE.Mesh(new THREE.PlaneGeometry(16, 12), mat(0x556677, { roughness: 0.6 }));
-  storeFloor.rotation.x = -Math.PI / 2; storeFloor.position.y = 0.03;
+  storeFloor.rotation.x = -Math.PI / 2; storeFloor.position.y = 0.06; // 稍高防闪烁
   storeGroup.add(storeFloor);
-  
   const storeCeil = new THREE.Mesh(new THREE.PlaneGeometry(16, 12), mat(0x11151c));
   storeCeil.rotation.x = Math.PI / 2; storeCeil.position.y = 4.0;
   storeGroup.add(storeCeil);
 
-  // 墙体
   box(0.2, 4, 12, 0x334455, -8, 2, 0, storeGroup);
   box(0.2, 4, 12, 0x334455, 8, 2, 0, storeGroup);
   box(16, 4, 0.2, 0x334455, 0, 2, -6, storeGroup);
-  // 门框
   box(5, 4, 0.2, 0x334455, -5.5, 2, 6, storeGroup);
   box(5, 4, 0.2, 0x334455, 5.5, 2, 6, storeGroup);
   box(6, 1, 0.2, 0x334455, 0, 3.5, 6, storeGroup);
-  // 发光招牌
-  const storeSign = new THREE.Mesh(new THREE.PlaneGeometry(6, 0.8), new THREE.MeshBasicMaterial({ color: 0xffaa00 }));
-  storeSign.position.set(0, 3.5, 6.11);
-  storeGroup.add(storeSign);
+  
+  addObstacle(32, -25, 0.1, 6);
+  addObstacle(48, -25, 0.1, 6);
+  addObstacle(40, -31, 8, 0.1);
+  addObstacle(34.5, -19, 2.5, 0.1);
+  addObstacle(45.5, -19, 2.5, 0.1);
 
-  // 碰撞体
-  addObstacle(32, -25, 0.1, 6); // 左
-  addObstacle(48, -25, 0.1, 6); // 右
-  addObstacle(40, -31, 8, 0.1); // 后
-  addObstacle(34.5, -19, 2.5, 0.1); // 左门框
-  addObstacle(45.5, -19, 2.5, 0.1); // 右门框
-
-  // 豪华货架 + 商品
-  const shelfHeights = [0.4, 1.2, 2.0];
-  for (let sx of [-5, 5]) {
-    // 货架柜体
-    box(1.2, 2.2, 10, 0x1a2233, sx, 1.1, 0, storeGroup);
-    for (let h of shelfHeights) {
-      for (let z = -4.2; z <= 4.2; z += 0.6) {
-        const c = [0xff4444, 0x44ff44, 0x4444ff, 0xffff44][Math.floor(Math.random()*4)];
-        box(0.5, 0.5, 0.5, c, sx > 0 ? 4.6 : -4.6, h + 0.275, z, storeGroup);
-      }
-    }
-    // 货架碰撞体
-    addObstacle(sx > 0 ? 45 : 35, -25, 0.6, 5);
-  }
-
-  // 灯光
-  const storeLight = new THREE.PointLight(0xffffff, 1.8, 22, 2);
+  const storeLight = new THREE.PointLight(0xffffff, 1.5, 20, 2);
   storeLight.position.set(0, 3.8, 0);
   storeGroup.add(storeLight);
-  for (let lx = -4; lx <= 4; lx += 4) {
-    const tube = new THREE.Mesh(new THREE.BoxGeometry(3, 0.05, 0.2), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-    tube.position.set(lx, 3.9, 0);
-    storeGroup.add(tube);
-  }
-
-  // 收银台与监控
+  
   box(3, 1.1, 1.2, 0x334455, 0, 0.55, -4, storeGroup);
   addObstacle(40, -29, 1.5, 0.6);
-  
   const monitor = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1), new THREE.MeshBasicMaterial({ color: 0x00ffcc }));
   monitor.position.set(0, 2.5, -5.89);
   storeGroup.add(monitor);
@@ -196,16 +158,14 @@ function buildStreet() {
   };
   interactables.push(monitor);
 
-  // 6. 售货机 (放到便利店门外右侧的人行道上，全局 X=52, Z=-16)
+  // 6. 售货机
   const vendGroup = new THREE.Group();
-  vendGroup.position.set(44, 0, -16); // 局部 X=44
+  vendGroup.position.set(30, 0, -19); 
   streetGroup.add(vendGroup);
-  
   const vendBox = box(1.2, 2.0, 0.8, 0x1a2233, 0, 1.0, 0, vendGroup);
   const vendGlow = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 1.2), new THREE.MeshBasicMaterial({ color: 0x5b8cff }));
   vendGlow.position.set(0, 1.3, 0.41);
   vendGroup.add(vendGlow);
-  
   vendBox.userData.interact = { 
     label: '购买补给 (E)', 
     action: () => {
@@ -216,9 +176,9 @@ function buildStreet() {
     }
   };
   interactables.push(vendBox);
-  addObstacle(52, -16, 0.6, 0.4); 
+  addObstacle(38, -19, 0.6, 0.4); 
 
-  // 7. 涂鸦 (藏在全图最东南角的暗巷里)
+  // 7. 涂鸦 (偏僻角落)
   const graffitiTex = (() => {
     const c = document.createElement('canvas'); c.width = 512; c.height = 256;
     const x = c.getContext('2d');
@@ -229,27 +189,13 @@ function buildStreet() {
     x.fillText('—— 46th NOI', 200, 180);
     return new THREE.CanvasTexture(c);
   })();
-  
-  const graffitiGroup = new THREE.Group();
-  // 背板
-  const backboard = new THREE.Mesh(getBoxGeo(5.2, 2.7, 0.2), mat(0x222222));
-  graffitiGroup.add(backboard);
-  // 贴图面
-  const graffitiFace = new THREE.Mesh(new THREE.PlaneGeometry(5, 2.5), new THREE.MeshBasicMaterial({ map: graffitiTex }));
-  graffitiFace.position.z = 0.11;
-  graffitiGroup.add(graffitiFace);
-  
-  // 东南角最后一栋大楼：全局中心 X=160, Z=75。它的北面墙在全局 Z=60。
-  // 局部 X = 160 - 8 = 152。局部 Z = 60 - 0.2 = 59.8。
-  graffitiGroup.position.set(152, 3, 59.8); 
-  graffitiGroup.rotation.y = Math.PI; // 面朝北边（面朝街尾小巷）
-  streetGroup.add(graffitiGroup);
-  
-  // 触发区
-  const graffitiTrigger = new THREE.Mesh(new THREE.BoxGeometry(6, 4, 2), new THREE.MeshBasicMaterial({ visible: false }));
-  graffitiTrigger.position.set(152, 3, 58); 
+  const graffiti = new THREE.Mesh(new THREE.PlaneGeometry(5, 2.5), new THREE.MeshBasicMaterial({ map: graffitiTex }));
+  graffiti.position.set(3.05, 2.5, 75); 
+  graffiti.rotation.y = Math.PI / 2; 
+  streetGroup.add(graffiti);
+  const graffitiTrigger = new THREE.Mesh(new THREE.BoxGeometry(2, 3, 5), new THREE.MeshBasicMaterial({ visible: false }));
+  graffitiTrigger.position.set(5, 2.5, 75); 
   streetGroup.add(graffitiTrigger);
-  
   graffitiTrigger.userData.interact = {
     label: '阅读涂鸦',
     action: () => {
@@ -259,9 +205,9 @@ function buildStreet() {
   };
   interactables.push(graffitiTrigger);
 
-  // 8. 出城隧道 (移到地图最北端 X=60)
+  // 8. 出城隧道
   const endTunnel = new THREE.Group();
-  endTunnel.position.set(52, 0, -107); // 全局 X=60, Z=-107
+  endTunnel.position.set(52, 0, -107); 
   streetGroup.add(endTunnel);
   const tunnelBack = new THREE.Mesh(getBoxGeo(16, 10, 2), new THREE.MeshBasicMaterial({ color: 0x000000 }));
   tunnelBack.position.set(0, 4, -2); 
@@ -274,7 +220,7 @@ function buildStreet() {
   exitSign.position.set(0, 6, 5.9); endTunnel.add(exitSign);
   
   const tunnelTrigger = new THREE.Mesh(new THREE.BoxGeometry(14, 8, 6), new THREE.MeshBasicMaterial({ visible: false }));
-  tunnelTrigger.position.set(60, 4, -104); // 全局
+  tunnelTrigger.position.set(60, 4, -104);
   streetGroup.add(tunnelTrigger);
   tunnelTrigger.userData.interact = {
     label: '离开这座城市',
@@ -303,26 +249,23 @@ function buildStreet() {
     const hw = (1.8 * Math.abs(Math.cos(rotY)) + 4 * Math.abs(Math.sin(rotY))) / 2;
     const hd = (1.8 * Math.abs(Math.sin(rotY)) + 4 * Math.abs(Math.cos(rotY))) / 2;
     const obsRef = addObstacle(globalX, z, hw, hd);
-    
-    // 把长宽存进去，下车时动态更新碰撞体用
-    carGroup.userData = { isCar: true, hp: 100, obsRef, color, hw, hd };
+    carGroup.userData = { isCar: true, hp: 100, obsRef, color };
     cityCars.push(carGroup);
   }
 
   let spawned = 0, attempts = 0;
   const carColors = [0x8b0000, 0x2f4f4f, 0x1e90ff, 0xdaa520, 0x556b2f, 0x483d8b];
-  while (spawned < 30 && attempts < 300) { // 车辆生成上限提高到 30 辆
+  while (spawned < 30 && attempts < 300) { 
     attempts++;
     let rx, rz, rotY;
+    const bnds = getZoneBounds();
     if (Math.random() > 0.5) {
-      const roadX = ROAD_X[Math.floor(Math.random() * ROAD_X.length)];
-      rx = roadX + (Math.random() - 0.5) * 8;
-      rz = -90 + Math.random() * 180;
+      rx = bnds.minX + 15 + Math.random() * (bnds.maxX - bnds.minX - 30);
+      rz = (Math.random() - 0.5) * 8;
       rotY = Math.random() > 0.5 ? 0 : Math.PI;
     } else {
-      const roadZ = ROAD_Z[Math.floor(Math.random() * ROAD_Z.length)];
-      rx = -20 + Math.random() * 180;
-      rz = roadZ + (Math.random() - 0.5) * 8;
+      rx = 51 + Math.random() * 8;
+      rz = bnds.minZ + 15 + Math.random() * (bnds.maxZ - bnds.minZ - 30);
       rotY = Math.random() > 0.5 ? Math.PI / 2 : -Math.PI / 2;
     }
     if (!collides(rx, rz, 4.0)) {

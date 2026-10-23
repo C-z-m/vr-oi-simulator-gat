@@ -85,8 +85,10 @@ function updatePlayer(dt){
     
     // 获取全局边界
     const zb = getZoneBounds();
-    const nx = clamp(state.pos.x + _move.x, -25, 185);
-    const nz = clamp(state.pos.z + _move.z, -105, 105);
+    // 动态获取区域边界
+    const clamped = clampToZone(state.pos.x + _move.x, state.pos.z + _move.z);
+    const nx = clamped.x;
+    const nz = clamped.z;
     
     // 动态判断跨区（x > 8 算进入街道，x < 7 算回到考场）
     if (nx > 8 && currentZoneId !== 'street') {
@@ -114,11 +116,9 @@ function updatePlayer(dt){
   applyShake(dt);
 }
 
-/* ---------- 跳跃 ----------
-   空格起跳；重力积分 + 落地回零。dt 用世界步长，所以通报慢放期间
-   跳跃也会一起变慢，与移动速度保持一致。 */
-const JUMP_GRAVITY = 20;          // 重力（m/s²）
-const JUMP_VELOCITY = 6.4;        // 起跳初速度（m/s）→ 跳高约 1.0m
+/* ---------- 跳跃 ---------- */
+const JUMP_GRAVITY = 20;          
+const JUMP_VELOCITY = 6.4;        
 let jumpY = 0, velY = 0, onGround = true;
 const _jumpSafe = new THREE.Vector3(0, 0, -2.08);
 
@@ -126,7 +126,7 @@ function tryJump(){
   if (!onGround || state.view !== 'world' || state.ended) return;
   velY = JUMP_VELOCITY;
   onGround = false;
-  _jumpSafe.set(state.pos.x, 0, state.pos.z);   /* 记下起跳点，落地回溯用 */
+  _jumpSafe.set(state.pos.x, 0, state.pos.z);
   audio.beep(420, 0.05, 0.03, 'triangle');
 }
 
@@ -139,12 +139,66 @@ function updateJump(dt){
     velY = 0;
     onGround = true;
     audio.step();
-    /* 落点卡进障碍（比如桌面）→ 退回起跳点，不会卡死 */
+    
+    /* 【核心修复】落点卡进障碍时，不再强行传送回起点，而是智能向周围寻找空地滑出 */
     if (collides(state.pos.x, state.pos.z, 0.28)){
-      state.pos.x = _jumpSafe.x;
-      state.pos.z = _jumpSafe.z;
+      let found = false;
+      for (let r = 0.5; r <= 3.0; r += 0.5) {
+        if (!collides(state.pos.x + r, state.pos.z, 0.28)) { state.pos.x += r; found = true; break; }
+        if (!collides(state.pos.x - r, state.pos.z, 0.28)) { state.pos.x -= r; found = true; break; }
+        if (!collides(state.pos.x, state.pos.z + r, 0.28)) { state.pos.z += r; found = true; break; }
+        if (!collides(state.pos.x, state.pos.z - r, 0.28)) { state.pos.z -= r; found = true; break; }
+      }
+      // 如果四周全堵死了，才无奈退回起跳点
+      if (!found) {
+        state.pos.x = _jumpSafe.x;
+        state.pos.z = _jumpSafe.z;
+      }
     }
   }
+}
+
+function updatePlayer(dt){
+  updateJump(dt);
+  const sprinting = !!state.keys['shift'];
+  const speed = sprinting ? 5.0 : 3.1;   // Shift 加速
+  _fwd.set(-Math.sin(state.yaw), 0, -Math.cos(state.yaw));
+  _right.set(Math.cos(state.yaw), 0, -Math.sin(state.yaw));
+  _move.set(0, 0, 0);
+  if (state.keys['w']) _move.add(_fwd);
+  if (state.keys['s']) _move.sub(_fwd);
+  if (state.keys['d']) _move.add(_right);
+  if (state.keys['a']) _move.sub(_right);
+
+  const moving = _move.lengthSq() > 0;
+  lastMoveSpeed = moving ? speed : 0;
+  if (moving){
+    _move.normalize().multiplyScalar(speed * dt);
+    
+    const clamped = clampToZone(state.pos.x + _move.x, state.pos.z + _move.z);
+    const nx = clamped.x;
+    const nz = clamped.z;
+
+    /* 分轴滑动碰撞 */
+    const air = !onGround;
+    if (air || !collides(nx, state.pos.z, 0.28)) state.pos.x = nx;
+    if (air || !collides(state.pos.x, nz, 0.28)) state.pos.z = nz;
+
+    state.bob += dt * (sprinting ? 15 : 11);   // 疾走时脚步更急促
+    if (Math.sin(state.bob) > 0.96 && Math.random() < 0.4) audio.step();
+  } else {
+    state.bob += dt * 1.2;
+  }
+  
+  const bobY = moving ? Math.sin(state.bob) * 0.022 : Math.sin(state.bob) * 0.004;
+  
+  /* 【核心修复】把跳跃高度 jumpY 加上去！相机终于能上天了！ */
+  camera.position.set(state.pos.x, 1.65 + bobY + jumpY, state.pos.z);
+  camera.rotation.set(state.pitch, state.yaw, 0, 'YXZ');
+  
+  camera.rotation.x += recoilPitch;
+  camera.rotation.y += recoilYaw;
+  applyShake(dt);
 }
 
 /* ---------- 紧张态镜头抖动 ----------
@@ -181,61 +235,155 @@ function drawMinimap(){
   if (++mmFrameSkip % 4 !== 0) return;
   const c = minimap, ctx = mmCtx;
   const W = c.width, H = c.height;
-  ctx.fillStyle = 'rgba(10,13,20,.85)';
-  ctx.fillRect(0, 0, W, H);
+  
+  const SCALE = 8.75; // 统一比例尺：8.75 像素/米
 
-  /* 世界：x∈[-8,8], z∈[-7,7] */
-  const sx = W / 16, sy = H / 14;
-  const tx = x => (x + 8) * sx;
-  const ty = z => (z + 7) * sy;
+  if (currentZoneId === 'street') {
+    /* ================= 城市局部战术雷达 ================= */
+    const cx = state.pos.x;
+    const cz = state.pos.z;
+    const tx = x => (W / 2) + (x - cx) * SCALE;
+    const ty = z => (H / 2) + (z - cz) * SCALE;
 
-  /* 障碍 */
-  ctx.fillStyle = '#2a3242';
-  for (const o of obstacles){
-    ctx.fillRect(
-      tx(o.x - o.hw), ty(o.z - o.hd),
-      o.hw * 2 * sx, o.hd * 2 * sy
-    );
-  }
+    // 1. 统一底色：人行道/空地（浅灰蓝）
+    ctx.fillStyle = '#3a4555'; 
+    ctx.fillRect(0, 0, W, H);
 
-  /* NPC */
-  for (const n of npcs){
-    const ud = n.userData;
-    if (!ud) continue;
-    ctx.fillStyle = ud.state === 'seated' ? '#6a7a9a' : '#c08050';
+    // 2. 绘制车道（深色柏油路）
+    const ROAD_X = [20, 60, 100, 140];
+    const ROAD_Z = [-50, 0, 50];
+    const roadWidth = 14;
+    
+    ctx.fillStyle = '#556478'; // 调亮的车道 (石板灰)
+    for (let x of ROAD_X) {
+      const rx = tx(x - roadWidth / 2);
+      const rw = roadWidth * SCALE;
+      ctx.fillRect(rx, -H, rw, H * 3); 
+    }
+    for (let z of ROAD_Z) {
+      const rz = ty(z - roadWidth / 2);
+      const rh = roadWidth * SCALE;
+      ctx.fillRect(-W, rz, W * 3, rh);
+    }
+
+    // 3. 绘制所有非车辆障碍物（大楼，铁灰色）
+    ctx.fillStyle = '#2d3748'; 
+    ctx.strokeStyle = '#4a5868'; 
+    ctx.lineWidth = 1;
+    
+    for (const o of obstacles) {
+      if (o.active === false) continue;
+      if (o.hw > 30 || o.hd > 30) continue; // 过滤边界墙
+      
+      const ox = tx(o.x);
+      const oz = ty(o.z);
+      
+      const left = ox - o.hw * SCALE;
+      const right = ox + o.hw * SCALE;
+      const top = oz - o.hd * SCALE;
+      const bottom = oz + o.hd * SCALE;
+      
+      if (right < 0 || left > W || bottom < 0 || top > H) continue;
+      
+      // 画铁灰大楼并描边
+      ctx.fillRect(left, top, right - left, bottom - top);
+      if (o.hw >= 10) ctx.strokeRect(left, top, right - left, bottom - top);
+    }
+
+    // 4. 绘制车辆（显眼的亮绿色）
+    ctx.fillStyle = '#38d39f';
+    for (const car of cityCars) {
+      if (car.userData.hp <= 0) continue;
+      const carx = tx(car.position.x + 8);
+      const carz = ty(car.position.z);
+      if (carx < -10 || carx > W + 10 || carz < -10 || carz > H + 10) continue;
+      
+      ctx.beginPath();
+      ctx.arc(carx, carz, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 5. 绘制敌人（红色）
+    for (const p of policeUnits) {
+      if (p.userData.state === 'down') continue;
+      const px = tx(p.group.position.x);
+      const pz = ty(p.group.position.z);
+      if (px < -10 || px > W + 10 || pz < -10 || pz > H + 10) continue;
+      const pulse = 0.7 + 0.3 * Math.sin(performance.now() * 0.01);
+      ctx.fillStyle = `rgba(255,68,68,${pulse})`;
+      ctx.beginPath(); ctx.arc(px, pz, 3.5, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 6. 绘制路人（黄色）
+    ctx.fillStyle = '#ffaa00';
+    for (const n of cityNpcs) {
+      if (n.userData.state === 'down') continue;
+      const nx = tx(n.group.position.x);
+      const nz = ty(n.group.position.z);
+      if (nx < -10 || nx > W + 10 || nz < -10 || nz > H + 10) continue;
+      ctx.beginPath(); ctx.arc(nx, nz, 2, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 7. 绘制玩家
+    const cxPx = W / 2;
+    const czPx = H / 2;
+    ctx.fillStyle = '#5b8cff';
+    ctx.beginPath(); ctx.arc(cxPx, czPx, 3.4, 0, Math.PI * 2); ctx.fill();
+    
+    ctx.strokeStyle = 'rgba(91,140,255,.85)';
+    ctx.lineWidth = 1.6;
     ctx.beginPath();
-    ctx.arc(tx(n.group.position.x), ty(n.group.position.z), 2.2, 0, 7);
-    ctx.fill();
-  }
+    ctx.moveTo(cxPx, czPx);
+    ctx.lineTo(cxPx - Math.sin(state.yaw) * 9, czPx - Math.cos(state.yaw) * 9);
+    ctx.stroke();
 
-  /* 老师 */
-  if (teacher){
-    ctx.fillStyle = '#ffcc57';
+  } else {
+    /* ================= 传统考场全景模式 ================= */
+    ctx.fillStyle = '#3a4555'; // 考场底色
+    ctx.fillRect(0, 0, W, H);
+
+    const tx = x => (W / 2) + x * SCALE;
+    const ty = z => (H / 2) + z * SCALE;
+
+    // 障碍
+    ctx.fillStyle = '#4a5868';
+    for (const o of obstacles) {
+      if (o.active === false) continue;
+      if (o.x > 15 || o.x < -15 || o.z > 15 || o.z < -15) continue; 
+      ctx.fillRect(tx(o.x - o.hw), ty(o.z - o.hd), o.hw * 2 * SCALE, o.hd * 2 * SCALE);
+    }
+
+    // NPC
+    for (const n of npcs) {
+      const ud = n.userData;
+      if (!ud) continue;
+      ctx.fillStyle = '#ffaa00';
+      ctx.beginPath(); ctx.arc(tx(n.group.position.x), ty(n.group.position.z), 2.2, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 老师
+    if (teacher) {
+      ctx.fillStyle = '#ffcc57';
+      ctx.beginPath(); ctx.arc(tx(teacher.group.position.x), ty(teacher.group.position.z), 2.8, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 保安
+    for (const g of securityGuards) {
+      if (!g.userData.alive) continue;
+      const pulse = 0.7 + 0.3 * Math.sin(performance.now() * 0.01);
+      ctx.fillStyle = `rgba(255,68,68,${pulse})`;
+      ctx.beginPath(); ctx.arc(tx(g.group.position.x), ty(g.group.position.z), 3.2, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 玩家
+    const px = tx(state.pos.x), py = ty(state.pos.z);
+    ctx.fillStyle = '#5b8cff';
+    ctx.beginPath(); ctx.arc(px, py, 3.4, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(91,140,255,.85)';
+    ctx.lineWidth = 1.6;
     ctx.beginPath();
-    ctx.arc(tx(teacher.group.position.x), ty(teacher.group.position.z), 2.8, 0, 7);
-    ctx.fill();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px - Math.sin(state.yaw) * 9, py - Math.cos(state.yaw) * 9);
+    ctx.stroke();
   }
-
-  /* 保安 */
-  for (const g of securityGuards){
-    if (!g.userData.alive) continue;
-    const pulse = 0.7 + 0.3 * Math.sin(performance.now() * 0.01);
-    ctx.fillStyle = `rgba(255,68,68,${pulse})`;
-    ctx.beginPath();
-    ctx.arc(tx(g.group.position.x), ty(g.group.position.z), 3.2, 0, 7);
-    ctx.fill();
-  }
-
-  /* 玩家 + 朝向 */
-  const px = tx(state.pos.x), py = ty(state.pos.z);
-  ctx.fillStyle = '#5b8cff';
-  ctx.beginPath();
-  ctx.arc(px, py, 3.4, 0, 7);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(91,140,255,.85)';
-  ctx.lineWidth = 1.6;
-  ctx.beginPath();
-  ctx.moveTo(px, py);
-  ctx.lineTo(px - Math.sin(state.yaw) * 9, py - Math.cos(state.yaw) * 9);
-  ctx.stroke();
 }

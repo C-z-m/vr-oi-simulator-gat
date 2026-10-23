@@ -114,6 +114,19 @@ function startCityTransition() {
         state.cityMode.nightmare = true;
         state.cityMode.wantedLevel = 1;
         state.cityMode.killCount = 0; // 新增这个
+        
+        // 【核心修复】彻底抹除考场的所有痕迹与视觉残留
+        state.doorOpen = false; // 重置门的状态，防止再按 E
+        if (typeof sealClassroomDoor === 'function') {
+            sealClassroomDoor(); // 物理封死考场大门
+        }
+        
+        // 彻底关掉白光的各个组件（防止城市里出现穿越过来的大白块）
+        if (typeof doorLightMesh !== 'undefined' && doorLightMesh) doorLightMesh.visible = false;
+        if (typeof doorGlowMesh !== 'undefined' && doorGlowMesh) doorGlowMesh.visible = false;
+        if (typeof doorFloorMesh !== 'undefined' && doorFloorMesh) doorFloorMesh.visible = false;
+        if (typeof doorPointLight !== 'undefined' && doorPointLight) doorPointLight.intensity = 0;
+
         unlockAch('army');
         
         // 强制刷新 HUD 上的通缉星为 1 颗

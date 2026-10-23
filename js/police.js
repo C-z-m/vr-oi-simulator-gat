@@ -1,6 +1,6 @@
 'use strict';
 /* =========================================================
-   police —— 警察兵种系统、移动射击与星级压制
+   police —— 警察兵种系统、移动射击与星级压制（区域边界统一版）
    ========================================================= */
 
 const policeUnits = [];
@@ -59,14 +59,16 @@ function spawnPolice(level) {
   const px = state.pos.x;
   let spawnX, spawnZ, safe = false, tries = 0;
   
+  const bounds = getZoneBounds();
+  
   while (!safe && tries < 20) {
     const angle = Math.random() * Math.PI * 2;
     const dist = 20 + Math.random() * 30;
-    spawnX = state.pos.x + Math.cos(angle) * dist;
+    spawnX = px + Math.cos(angle) * dist;
     spawnZ = state.pos.z + Math.sin(angle) * dist;
     
-    // 修正边界
-    if (spawnX < -30 || spawnX > 180 || spawnZ < -50 || spawnZ > 50) {
+    // 统一使用 zones 提供的边界
+    if (spawnX < bounds.minX || spawnX > bounds.maxX || spawnZ < bounds.minZ || spawnZ > bounds.maxZ) {
       tries++;
       continue;
     }
@@ -93,7 +95,7 @@ function spawnPolice(level) {
       const angle = Math.random() * Math.PI * 2;
       spawnX = px + Math.cos(angle) * 35;
       spawnZ = state.pos.z + Math.sin(angle) * 35;
-      if (spawnX > -10 && spawnX < 120 && spawnZ > -50 && spawnZ < 50 && !collides(spawnX, spawnZ, 0.5)) {
+      if (spawnX > bounds.minX && spawnX < bounds.maxX && spawnZ > bounds.minZ && spawnZ < bounds.maxZ && !collides(spawnX, spawnZ, 0.5)) {
         safe = true;
       }
       tries++;
@@ -188,7 +190,6 @@ function updatePolice(dt, t) {
           ud.path = newPath;
           ud.pathIndex = 0;
         } else {
-          // 【核心修复】如果算不出路，直接清空路径，逼迫他走下面的“盲目突进”逻辑
           ud.path = [];
         }
       }
@@ -196,7 +197,6 @@ function updatePolice(dt, t) {
       const step = ud.speed * dt;
       
       if (ud.path && ud.pathIndex < ud.path.length) {
-        // 走 A* 路径
         for (let lookAhead = Math.min(ud.pathIndex + 4, ud.path.length - 1); lookAhead > ud.pathIndex; lookAhead--) {
           const node = ud.path[lookAhead];
           if (policeHasLOS(p.group.position.x, p.group.position.z, node.x, node.z)) {
@@ -217,18 +217,18 @@ function updatePolice(dt, t) {
           if (!collides(p.group.position.x, nz, 0.2)) p.group.position.z = nz;
         }
       } else {
-        // 【核心修复】如果 A* 失败（比如目标点不可达），不罚站，直接朝玩家盲冲！
         const dxNorm = dx / dist;
         const dzNorm = dz / dist;
-        
         const nx = p.group.position.x + dxNorm * step;
         const nz = p.group.position.z + dzNorm * step;
         if (!collides(nx, p.group.position.z, 0.2)) p.group.position.x = nx;
         if (!collides(p.group.position.x, nz, 0.2)) p.group.position.z = nz;
       }
       
-      p.group.position.x = clamp(p.group.position.x, -25, 185);
-      p.group.position.z = clamp(p.group.position.z, -105, 105);
+      // 使用统一边界限制
+      const clampedP = clampToZone(p.group.position.x, p.group.position.z);
+      p.group.position.x = clampedP.x;
+      p.group.position.z = clampedP.z;
       
       p.armL.rotation.x = Math.sin(t * 12) * 0.5;
       p.armR.rotation.x = -Math.sin(t * 12) * 0.5;

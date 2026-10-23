@@ -94,9 +94,9 @@ function updateInteract(){
     }
   }
 
-  /* 出口 → E */
+  /* 出口 → E (仅限考场内触发) */
   const dDoor = Math.hypot(state.pos.x - 7.85, state.pos.z - 0);
-  if (dDoor < 3.0){
+  if (dDoor < 3.0 && currentZoneId === 'classroom'){ // 【核心修复】加上区域限制
     /* 终局：门已开，走向白光即可走出去 */
     if (state.doorOpen){
       actionE = { fn: walkOutOfTheRoom };

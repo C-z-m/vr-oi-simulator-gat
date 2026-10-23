@@ -190,11 +190,13 @@ function buildStreet() {
     return new THREE.CanvasTexture(c);
   })();
   const graffiti = new THREE.Mesh(new THREE.PlaneGeometry(5, 2.5), new THREE.MeshBasicMaterial({ map: graffitiTex }));
-  graffiti.position.set(3.05, 2.5, 75); 
-  graffiti.rotation.y = Math.PI / 2; 
+  // 挪到东边大楼 (X=160, Z=75) 的正北面墙上
+  graffiti.position.set(152, 2.5, 59.9); 
+  graffiti.rotation.y = 0; // 面朝北边街道
   streetGroup.add(graffiti);
-  const graffitiTrigger = new THREE.Mesh(new THREE.BoxGeometry(2, 3, 5), new THREE.MeshBasicMaterial({ visible: false }));
-  graffitiTrigger.position.set(5, 2.5, 75); 
+  
+  const graffitiTrigger = new THREE.Mesh(new THREE.BoxGeometry(5, 3, 2), new THREE.MeshBasicMaterial({ visible: false }));
+  graffitiTrigger.position.set(160, 2.5, 58.5); 
   streetGroup.add(graffitiTrigger);
   graffitiTrigger.userData.interact = {
     label: '阅读涂鸦',
@@ -327,6 +329,11 @@ function buildStreet() {
     curH += 1.15;
   }
 
-  // 终极天台 (高 36 米，完美覆盖楼顶边缘，助你一跃登顶)
-  createPlatform(104.5, -10.5, curH + 0.5, 0xffaa00, 4.0);
+  // 终极天台 (高约 55 米)
+  createPlatform(104.5, -10.5, curH + 0.5, 0xffaa00, 6.0); 
+
+  // 【核心修复】把直升机生成在天台正上方 (天台高度 + 2米)
+  if (typeof spawnHelicopter === 'function') {
+    spawnHelicopter(104.5, curH + 2.0, -10.5);
+  }
 }

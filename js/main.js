@@ -329,8 +329,13 @@ function animate(){
 
   if (inWorld && state.started && !state.ended && !state.frozen){
     if (typeof drivingState !== 'undefined' && drivingState.isDriving) {
-      // 【新增】调用驾驶更新逻辑
+      // 【核心修复】加上 applyLook，让鼠标视角在开车时生效
+      applyLook(realDt);
       if (typeof updateDriving === 'function') updateDriving(realDt);
+    } else if (typeof heliState !== 'undefined' && heliState.isDriving) {
+      // 【核心修复】直升机模式也必须调用视角更新，否则鼠标转不动！
+      applyLook(realDt);
+      if (typeof updateHelicopter === 'function') updateHelicopter(realDt);
     } else {
       applyLook(realDt);
       updatePlayer(worldDt);

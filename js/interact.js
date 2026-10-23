@@ -151,6 +151,29 @@ function updateInteract(){
    持枪时整体不参与（见 updateInteract 的 gunUp 分支）。 */
 function tryMeleePrompt(){
   // ================= 1. 驾驶状态最高优先级 =================
+    // --- 新增：靠近直升机按 E 上机 ---
+  if (typeof heliState !== 'undefined' && !heliState.isDriving && heliGroup) {
+    const hx = heliGroup.position.x + 8;
+    const hz = heliGroup.position.z;
+    const hy = heliGroup.position.y;
+    
+    // 不仅要距离近，高度差也不能太大，否则你在楼下按 E 也能上 40 米的飞机
+    const d2d = Math.hypot(state.pos.x - hx, state.pos.z - hz);
+    if (d2d < 5.0 && Math.abs(state.pos.y - hy) < 5.0) {
+      actionE = { fn: enterHelicopter, label: '驾驶直升机' };
+      promptEl.textContent = '[ E ] 驾驶直升机';
+      promptEl.classList.remove('hidden');
+      return true;
+    }
+  }
+
+  // --- 已经在直升机里 ---
+  if (typeof heliState !== 'undefined' && heliState.isDriving) {
+    actionE = { fn: exitHelicopter, label: '跳出直升机' };
+    promptEl.textContent = '[ E ] 跳出直升机';
+    promptEl.classList.remove('hidden');
+    return true;
+  }
   if (typeof drivingState !== 'undefined' && drivingState.isDriving) {
     actionE = { fn: exitCar, label: '下车' };
     actionSpace = null;
